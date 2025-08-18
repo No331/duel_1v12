@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Duel 1v1</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div id="app" class="hidden"> 
+        <div class="menu-container">
+            <div class="menu-header">
+                <h1>NO3 FREEROAM</h1>
+                <p>Choisissez votre zone de combat</p>
+            </div>
+            
+            <div class="menu-content">
+                <!-- Section Pistolets -->
+                <div class="section">
+                    <h3>SÉLECTION D'ARME</h3>
+                    <div class="weapon-grid">
+                        <div class="weapon-card" data-weapon="pistol">
+                            <img src="https://img.gta5-mods.com/q75/images/beretta-m9a3-fivem-sp-animated-replace/117b60-BerettaRend.jpg" alt="Pistolet Standard">
+                            <div class="weapon-info">
+                                <span class="weapon-name">PISTOL</span>
+                            </div>
+                        </div>
+                        <div class="weapon-card" data-weapon="combat_pistol">
+                            <img src="https://img.gta5-mods.com/q95/images/vom-feuer-combat-pistol-black-mesa-glock-17/f34ba4-Platinum.jpg" alt="Pistolet de Combat">
+                            <div class="weapon-info">
+                                <span class="weapon-name">COMBAT PISTOL</span>
+                            </div>
+                        </div>
+                        <div class="weapon-card" data-weapon="heavy_pistol">
+                            <img src="https://img.gta5-mods.com/q75-w500-h333-cfill/images/hawk-little-military-pistol-replace-fivem-singleplayer/1d5fe4-20240302040115_1.jpg" alt="Pistolet Lourd">
+                            <div class="weapon-info">
+                                <span class="weapon-name">HEAVY PISTOL</span>
+                            </div>
+                        </div>
+                        <div class="weapon-card" data-weapon="vintage_pistol">
+                            <img src="https://img.gta5-mods.com/q75-w500-h333-cfill/images/m1911-from-cod-mw-2019/4c7704-1.jpg" alt="Pistolet Vintage">
+                            <div class="weapon-info">
+                                <span class="weapon-name">VINTAGE PISTOL</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Section Maps -->
+                <div class="section">
+                    <h3>ZONES DE COMBAT</h3>
+                    <div class="map-grid">
+                        <div class="map-card" data-map="aeroport">
+                            <img src="https://img.gta5-mods.com/q75/images/los-santos-to-los-angeles-lax-airport/405459-17.png" alt="Dock">
+                            <div class="map-overlay">
+                                <span class="map-name">AEROPORT</span>
+                            </div>
+                        </div>
+                        <div class="map-card" data-map="dans l'eau">
+                            <img src="https://rockstaractu.com/wp-content/uploads/2022/10/GTA-Online-Mise-a-jour-Braquage-de-Cayo-Perico-Vehicules-Sportives-classiques-Pegassi-Toreador-Image-1-1280p-x-720p-Qualite-50-Picture-by-Rockstar-Games.jpg" alt="Port">
+                            <div class="map-overlay">
+                                <span class="map-name">DANS L'EAU</span>
+                            </div>
+                        </div>
+                        <div class="map-card" data-map="foret">
+                            <img src="https://www.ginjfo.com/wp-content/uploads/2015/04/Rockstar-GTA-V-PC012.jpg" alt="Hangar">
+                            <div class="map-overlay">
+                                <span class="map-name">FORET</span>
+                            </div>
+                        </div>
+                        <div class="map-card" data-map="hippie">
+                            <img src="https://thedopechronicles.wordpress.com/wp-content/uploads/2013/11/0_0-80.jpg" alt="Usine">
+                            <div class="map-overlay">
+                                <span class="map-name">HIPPIE</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="selection-info">
+                    <p>Arme sélectionné: <span id="selectedWeapon">Aucun</span></p>
+                    <p>Zone sélectionnée: <span id="selectedMap">Aucune</span></p>
+                    <p>Joueurs connectés: <span id="playersCount">0/2</span></p>
+                </div>
+            </div>
+            
+            <div class="menu-footer">
+                <button id="createBtn" class="btn btn-primary" disabled>CRÉER L'ARÈNE</button>
+                <button id="joinBtn" class="btn btn-secondary" disabled>REJOINDRE UNE ARÈNE</button>
+                <button id="closeBtn" class="btn btn-close">FERMER</button>
+            </div>
+        </div>
+        
+        <!-- Modal pour la liste des arènes -->
+        <div id="arenaListModal" class="modal hidden">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h2>ARÈNES DISPONIBLES</h2>
+                    <button id="closeModalBtn" class="btn-close-modal">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <div id="arenaList" class="arena-list">
+                        <!-- Les arènes seront ajoutées ici dynamiquement -->
+                    </div>
+                    <div id="noArenas" class="no-arenas hidden">
+                        <p>Aucune arène disponible pour le moment.</p>
+                        <p>Créez votre propre arène !</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
