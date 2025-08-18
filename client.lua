@@ -7,18 +7,18 @@ local originalCoords = nil
 local currentArena = nil
 local selectedWeapon = nil
 local currentRounds = {
-    player1Score = 0,
-    player2Score = 0,
     currentRound = 0,
     maxRounds = 5,
-    showRoundCounter = false
+    myScore = 0,
+    opponentScore = 0,
+    showCounter = false
 }
 local isWaitingForRespawn = false
 
 -- Point d'interaction
 local interactionPoint = vector3(256.3, -776.82, 30.88)
 
--- Coordonnées des arènes avec zones limitées (50m de rayon)
+-- Coordonnées des arènes
 local arenas = {
     aeroport = {
         center = vector3(-1037.0, -2737.0, 20.0),
@@ -60,7 +60,6 @@ local arenas = {
 
 -- Thread principal pour le marker
 Citizen.CreateThread(function()
-    print("^2[DUEL] Thread marker démarré^7")
     while true do
         local playerPed = PlayerPedId()
         local playerCoords = GetEntityCoords(playerPed)
@@ -77,13 +76,11 @@ Citizen.CreateThread(function()
         
         -- Interaction proche
         if not inDuel and distance < 3.0 then
-            -- Affichage permanent du message E
             BeginTextCommandDisplayHelp("STRING")
             AddTextComponentSubstringPlayerName("Appuyez sur ~INPUT_CONTEXT~ pour ouvrir le menu de duel")
             EndTextCommandDisplayHelp(0, false, false, -1)
             
             if IsControlJustPressed(1, 38) and not isMenuOpen then
-                print("^3[DUEL] Touche E pressée^7")
                 openDuelMenu()
             end
         end
@@ -103,41 +100,38 @@ Citizen.CreateThread(function()
             if arena then
                 local distance = #(playerCoords - arena.center)
                 
-                -- Dessiner le cercle de limite en rouge permanent et visible
+                -- Dessiner les limites de la zone
                 DrawMarker(1, arena.center.x, arena.center.y, arena.center.z - 1.0,
                           0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
                           arena.radius * 2, arena.radius * 2, 1.0,
                           255, 0, 0, 100,
                           false, true, 2, false, nil, nil, false)
                 
-                -- Dessiner aussi un cercle au sol pour bien voir la limite
                 DrawMarker(25, arena.center.x, arena.center.y, arena.center.z,
                           0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
                           arena.radius * 2, arena.radius * 2, 2.0,
                           255, 0, 0, 80,
                           false, true, 2, false, nil, nil, false)
                 
-                -- Si le joueur dépasse la limite
+                -- Téléporter si hors limite
                 if distance > arena.radius then
-                    print("^1[DUEL] Joueur hors limite, téléportation au centre^7")
                     SetEntityCoords(playerPed, arena.center.x, arena.center.y, arena.center.z, false, false, false, true)
                     
                     TriggerEvent('chat:addMessage', {
                         color = {255, 0, 0},
-                        multiline = true,
-                        args = {"[DUEL]", "Vous avez dépassé la zone de combat ! Retour au centre."}
+                        args = {"[DUEL]", "Vous avez dépassé la zone de combat !"}
                     })
                 end
                 
-                -- Afficher le message pour quitter (permanent)
+                -- Afficher le message pour quitter
                 if not isWaitingForRespawn then
                     BeginTextCommandDisplayHelp("STRING")
                     AddTextComponentSubstringPlayerName("Appuyez sur ~INPUT_CONTEXT~ pour quitter le duel")
                     EndTextCommandDisplayHelp(0, false, false, -1)
                 end
                 
-                -- Afficher le compteur de manches en bas à droite
-                if currentRounds.showRoundCounter then
+                -- Afficher le compteur de manches
+                if currentRounds.showCounter then
                     SetTextFont(0)
                     SetTextProportional(1)
                     SetTextScale(0.8, 0.8)
@@ -148,19 +142,7 @@ Citizen.CreateThread(function()
                     SetTextWrap(0.0, 0.95)
                     SetTextEntry("STRING")
                     
-                    -- Afficher le score selon ma perspective
-                    local playerId = PlayerId()
-                    local scoreText = ""
-                    if playerId and currentRounds.player1Id and playerId == currentRounds.player1Id then
-                        -- Je suis joueur 1
-                        scoreText = "MANCHE " .. currentRounds.currentRound .. "/" .. currentRounds.maxRounds .. "~n~MON SCORE: " .. currentRounds.player1Score .. "-" .. currentRounds.player2Score
-                    elseif playerId and currentRounds.player2Id and playerId == currentRounds.player2Id then
-                        -- Je suis joueur 2
-                        scoreText = "MANCHE " .. currentRounds.currentRound .. "/" .. currentRounds.maxRounds .. "~n~MON SCORE: " .. currentRounds.player2Score .. "-" .. currentRounds.player1Score
-                    else
-                        -- Fallback
-                        scoreText = "MANCHE " .. currentRounds.currentRound .. "/" .. currentRounds.maxRounds .. "~n~SCORE: " .. currentRounds.player1Score .. "-" .. currentRounds.player2Score
-                    end
+                    local scoreText = "MANCHE " .. currentRounds.currentRound .. "/" .. currentRounds.maxRounds .. "~n~MON SCORE: " .. currentRounds.myScore .. "-" .. currentRounds.opponentScore
                     
                     AddTextComponentString(scoreText)
                     DrawText(0.95, 0.85)
@@ -177,7 +159,6 @@ Citizen.CreateThread(function()
     while true do
         if inDuel and not isWaitingForRespawn then
             if IsControlJustPressed(1, 38) then
-                print("^3[DUEL] Touche E pressée pour quitter le duel^7")
                 quitDuel()
             end
         end
@@ -191,16 +172,13 @@ Citizen.CreateThread(function()
         if inDuel then
             local playerPed = PlayerPedId()
             
-            -- Détecter la mort (santé <= 0 ou IsPedDeadOrDying)
+            -- Détecter la mort
             if (IsPedDeadOrDying(playerPed, true) or GetEntityHealth(playerPed) <= 100) and not isWaitingForRespawn then
-                print("^1[DUEL] Joueur mort détecté - Santé: " .. GetEntityHealth(playerPed) .. "^7")
                 isWaitingForRespawn = true
                 
                 -- Trouver qui a tué le joueur
                 local killer = GetPedSourceOfDeath(playerPed)
                 local killerPlayerId = nil
-                
-                print("^1[DUEL] Killer entity: " .. tostring(killer) .. "^7")
                 
                 if killer ~= 0 and killer ~= playerPed then
                     -- Chercher le joueur correspondant au killer
@@ -209,24 +187,16 @@ Citizen.CreateThread(function()
                             local otherPed = GetPlayerPed(i)
                             if otherPed == killer then
                                 killerPlayerId = i
-                                print("^2[DUEL] Killer trouvé: Joueur " .. i .. "^7")
                                 break
                             end
                         end
                     end
-                else
-                    print("^1[DUEL] Pas de killer valide trouvé^7")
                 end
                 
                 -- Signaler la mort au serveur
-                print("^1[DUEL] Envoi de la mort au serveur - Killer: " .. tostring(killerPlayerId) .. "^7")
-                print("^1[DUEL] Mon ID: " .. PlayerId() .. ", Instance: " .. tostring(currentInstanceId) .. "^7")
                 TriggerServerEvent('duel:playerDied', killerPlayerId)
                 
-                -- Vérifier que l'event est bien envoyé
-                print("^2[DUEL] Event 'duel:playerDied' envoyé avec killerPlayerId: " .. tostring(killerPlayerId) .. "^7")
-                
-                -- Attendre 2-3 secondes (temps de ragdoll)
+                -- Attendre avant de respawn
                 Citizen.SetTimeout(2500, function()
                     if inDuel then
                         respawnPlayer()
@@ -247,7 +217,6 @@ function respawnPlayer()
     if not arena then return end
     
     local playerPed = PlayerPedId()
-    local playerId = PlayerId()
     
     -- Choisir un spawn aléatoire
     local spawnIndex = math.random(1, #arena.spawns)
@@ -256,7 +225,6 @@ function respawnPlayer()
     -- Forcer la résurrection
     NetworkResurrectLocalPlayer(spawnPos.x, spawnPos.y, spawnPos.z, 0.0, true, false)
     
-    -- Attendre que le joueur soit respawné
     Citizen.Wait(100)
     
     local newPed = PlayerPedId()
@@ -267,7 +235,7 @@ function respawnPlayer()
     SetPedArmour(newPed, 100)
     ClearPedBloodDamage(newPed)
     
-    -- Redonner l'arme avec les bonnes munitions
+    -- Redonner l'arme
     local weapons = {
         pistol = "WEAPON_PISTOL",
         combat_pistol = "WEAPON_COMBATPISTOL",
@@ -281,13 +249,10 @@ function respawnPlayer()
     SetCurrentPedWeapon(newPed, weaponHash, true)
     
     isWaitingForRespawn = false
-    
-    print("^2[DUEL] Joueur respawné dans l'arène^7")
 end
 
 -- Fonction pour ouvrir le menu
 function openDuelMenu()
-    print("^3[DUEL] Ouverture du menu^7")
     local playerPed = PlayerPedId()
     originalCoords = GetEntityCoords(playerPed)
     
@@ -303,7 +268,6 @@ end
 
 -- Fonction pour fermer le menu
 function closeDuelMenu()
-    print("^3[DUEL] Fermeture du menu^7")
     isMenuOpen = false
     SetNuiFocus(false, false)
     
@@ -314,8 +278,6 @@ end
 
 -- Fonction pour quitter le duel
 function quitDuel()
-    print("^3[DUEL] Quitter le duel^7")
-    
     -- Enlever le kevlar
     local playerPed = PlayerPedId()
     SetPedArmour(playerPed, 0)
@@ -328,6 +290,7 @@ function quitDuel()
     currentInstanceId = nil
     currentArena = nil
     isWaitingForRespawn = false
+    currentRounds.showCounter = false
     
     RemoveAllPedWeapons(playerPed, true)
     
@@ -339,30 +302,27 @@ function quitDuel()
     
     TriggerEvent('chat:addMessage', {
         color = {0, 255, 0},
-        multiline = true,
-        args = {"[DUEL]", "Vous avez quitté l'arène et êtes retourné au point de départ."}
+        args = {"[DUEL]", "Vous avez quitté l'arène."}
     })
 end
 
 -- Fonction pour désactiver les permissions du joueur
 function disablePlayerPermissions()
-    print("^1[DUEL] Désactivation des permissions^7")
-    
     Citizen.CreateThread(function()
         while inDuel do
-            DisableControlAction(0, 200, true)
-            DisableControlAction(0, 288, true)
-            DisableControlAction(0, 289, true)
-            DisableControlAction(0, 170, true)
-            DisableControlAction(0, 167, true)
-            DisableControlAction(0, 166, true)
-            DisableControlAction(0, 199, true)
-            DisableControlAction(0, 75, true)
-            DisableControlAction(0, 23, true)
-            DisableControlAction(0, 47, true)
-            DisableControlAction(0, 74, true)
-            DisableControlAction(0, 245, true)
-            DisableControlAction(0, 244, true)
+            DisableControlAction(0, 200, true) -- ESC
+            DisableControlAction(0, 288, true) -- F1
+            DisableControlAction(0, 289, true) -- F2
+            DisableControlAction(0, 170, true) -- F3
+            DisableControlAction(0, 167, true) -- F6
+            DisableControlAction(0, 166, true) -- F5
+            DisableControlAction(0, 199, true) -- P
+            DisableControlAction(0, 75, true)  -- F
+            DisableControlAction(0, 23, true)  -- F
+            DisableControlAction(0, 47, true)  -- G
+            DisableControlAction(0, 74, true)  -- H
+            DisableControlAction(0, 245, true) -- T
+            DisableControlAction(0, 244, true) -- M
             
             Citizen.Wait(0)
         end
@@ -371,55 +331,36 @@ end
 
 -- Fonction pour réactiver les permissions du joueur
 function enablePlayerPermissions()
-    print("^2[DUEL] Réactivation des permissions^7")
+    -- Les permissions sont automatiquement réactivées quand la boucle se termine
 end
 
 -- Callbacks NUI
 RegisterNUICallback('closeMenu', function(data, cb)
-    print("^2[DUEL] Callback closeMenu reçu^7")
     closeDuelMenu()
     cb('ok')
 end)
 
 RegisterNUICallback('createArena', function(data, cb)
-    print("^2[DUEL] ========== CALLBACK CREATEARENA ==========^7")
-    print("^3[DUEL] Données reçues: weapon=" .. tostring(data.weapon) .. ", map=" .. tostring(data.map) .. "^7")
-    
     if not data.weapon or not data.map then
-        print("^1[DUEL] Données manquantes^7")
         cb('error')
         return
     end
     
     selectedWeapon = data.weapon
-    
-    print("^2[DUEL] Fermeture du menu^7")
     closeDuelMenu()
-    
-    print("^2[DUEL] Envoi vers le serveur pour créer l'arène^7")
     TriggerServerEvent('duel:createArena', data.weapon, data.map)
-    
     cb('ok')
 end)
 
 RegisterNUICallback('joinSpecificArena', function(data, cb)
-    print("^2[DUEL] ========== CALLBACK JOIN SPECIFIC ARENA ==========^7")
-    print("^3[DUEL] Données reçues: arenaId=" .. tostring(data.arenaId) .. ", weapon=" .. tostring(data.weapon) .. "^7")
-    
     if not data.arenaId or not data.weapon then
-        print("^1[DUEL] Données manquantes^7")
         cb('error')
         return
     end
     
     selectedWeapon = data.weapon
-    
-    print("^2[DUEL] Fermeture du menu^7")
     closeDuelMenu()
-    
-    print("^2[DUEL] Envoi vers le serveur pour rejoindre l'arène spécifique^7")
     TriggerServerEvent('duel:joinSpecificArena', data.arenaId, data.weapon)
-    
     cb('ok')
 end)
 
@@ -428,7 +369,6 @@ Citizen.CreateThread(function()
     while true do
         if isMenuOpen then
             if IsControlJustPressed(1, 322) then
-                print("^3[DUEL] ESC pressé^7")
                 closeDuelMenu()
             end
         end
@@ -439,8 +379,6 @@ end)
 -- Event reçu quand une instance est créée
 RegisterNetEvent('duel:instanceCreated')
 AddEventHandler('duel:instanceCreated', function(instanceId, weapon, map)
-    print("^2[DUEL] Instance " .. tostring(instanceId) .. " créée pour arène '" .. tostring(map) .. "'^7")
-    
     inDuel = true
     currentInstanceId = instanceId
     currentArena = map
@@ -449,19 +387,16 @@ AddEventHandler('duel:instanceCreated', function(instanceId, weapon, map)
     disablePlayerPermissions()
     
     local playerPed = PlayerPedId()
-    local playerId = PlayerId()
     local arena = arenas[map]
     
     if arena then
-        -- Spawn à une position spécifique selon l'ordre d'arrivée
-        local spawnPos = arena.spawns[1] -- Premier spawn par défaut
+        -- Spawn à la première position
+        local spawnPos = arena.spawns[1]
         SetEntityCoords(playerPed, spawnPos.x, spawnPos.y, spawnPos.z, false, false, false, true)
         
-        -- Heal complet + kevlar max à l'entrée
+        -- Heal complet + kevlar max
         SetEntityHealth(playerPed, 200)
         SetPedArmour(playerPed, 100)
-        
-        print("^2[DUEL] Téléportation vers " .. arena.name .. " avec heal et kevlar^7")
         
         local weapons = {
             pistol = "WEAPON_PISTOL",
@@ -471,37 +406,29 @@ AddEventHandler('duel:instanceCreated', function(instanceId, weapon, map)
         }
         
         RemoveAllPedWeapons(playerPed, true)
-        
         local weaponHash = GetHashKey(weapons[weapon] or weapons.pistol)
         GiveWeaponToPed(playerPed, weaponHash, 250, false, true)
         
         TriggerEvent('chat:addMessage', {
             color = {0, 255, 0},
-            multiline = true,
             args = {"[DUEL]", "Vous êtes dans l'arène " .. arena.name .. " ! En attente d'un adversaire..."}
         })
-    else
-        print("^1[DUEL] Arène '" .. tostring(map) .. "' non trouvée dans la liste des arènes^7")
-        print("^1[DUEL] Arènes disponibles: aeroport, dans l'eau, foret, hippie^7")
     end
 end)
 
 -- Event reçu quand une instance est supprimée
 RegisterNetEvent('duel:instanceDeleted')
 AddEventHandler('duel:instanceDeleted', function()
-    print("^1[DUEL] Instance supprimée^7")
-    
     enablePlayerPermissions()
     
     inDuel = false
     currentInstanceId = nil
     currentArena = nil
     isWaitingForRespawn = false
+    currentRounds.showCounter = false
     
-    -- Enlever le kevlar à la sortie
     local playerPed = PlayerPedId()
     SetPedArmour(playerPed, 0)
-    
     RemoveAllPedWeapons(playerPed, true)
     
     if originalCoords then
@@ -512,16 +439,13 @@ AddEventHandler('duel:instanceDeleted', function()
     
     TriggerEvent('chat:addMessage', {
         color = {255, 165, 0},
-        multiline = true,
-        args = {"[DUEL]", "Vous avez quitté votre instance privée et êtes retourné au point de départ."}
+        args = {"[DUEL]", "Vous avez quitté l'arène."}
     })
 end)
 
 -- Event reçu pour mettre à jour la liste des arènes disponibles
 RegisterNetEvent('duel:updateAvailableArenas')
 AddEventHandler('duel:updateAvailableArenas', function(arenas)
-    print("^3[DUEL] Mise à jour des arènes disponibles: " .. #arenas .. " arène(s)^7")
-    
     SendNUIMessage({
         type = "updateArenas",
         arenas = arenas
@@ -531,226 +455,113 @@ end)
 -- Event reçu quand un adversaire rejoint
 RegisterNetEvent('duel:opponentJoined')
 AddEventHandler('duel:opponentJoined', function(opponentName)
-    print("^2[DUEL] Adversaire rejoint: " .. tostring(opponentName) .. "^7")
-    
-    -- Activer l'affichage du compteur de manches
-    currentRounds.showRoundCounter = true
+    -- Activer l'affichage du compteur
+    currentRounds.showCounter = true
+    currentRounds.currentRound = 0
+    currentRounds.myScore = 0
+    currentRounds.opponentScore = 0
     
     TriggerEvent('chat:addMessage', {
         color = {0, 255, 0},
-        multiline = true,
         args = {"[DUEL]", opponentName .. " a rejoint l'arène ! Le duel commence dans 3 secondes..."}
     })
     
-    -- Compte à rebours avec affichage à l'écran
-    TriggerEvent('chat:addMessage', {
-        color = {255, 165, 0},
-        args = {"[DUEL]", "3..."}
-    })
+    -- Compte à rebours
+    local countdownMessages = {"3...", "2...", "1...", "GO !"}
+    local countdownColors = {{255, 165, 0}, {255, 165, 0}, {255, 165, 0}, {255, 0, 0}}
     
-    -- Affichage grand écran pour le compte à rebours
-    Citizen.CreateThread(function()
-        -- 3
-        local startTime = GetGameTimer()
-        while GetGameTimer() - startTime < 1000 do
-            SetTextFont(0)
-            SetTextProportional(1)
-            SetTextScale(3.0, 3.0)
-            SetTextColour(255, 255, 255, 255)
-            SetTextDropshadow(0, 0, 0, 0, 255)
-            SetTextEdge(2, 0, 0, 0, 150)
-            SetTextCentre(true)
-            SetTextEntry("STRING")
-            AddTextComponentString("3")
-            DrawText(0.5, 0.4)
-            Citizen.Wait(0)
-        end
-    end)
-    
-    Citizen.SetTimeout(1000, function()
-        TriggerEvent('chat:addMessage', {
-            color = {255, 165, 0},
-            args = {"[DUEL]", "2..."}
-        })
-        
-        -- Affichage grand écran pour 2
-        Citizen.CreateThread(function()
-            local startTime = GetGameTimer()
-            while GetGameTimer() - startTime < 1000 do
-                SetTextFont(0)
-                SetTextProportional(1)
-                SetTextScale(3.0, 3.0)
-                SetTextColour(255, 255, 255, 255)
-                SetTextDropshadow(0, 0, 0, 0, 255)
-                SetTextEdge(2, 0, 0, 0, 150)
-                SetTextCentre(true)
-                SetTextEntry("STRING")
-                AddTextComponentString("2")
-                DrawText(0.5, 0.4)
-                Citizen.Wait(0)
-            end
+    for i, message in ipairs(countdownMessages) do
+        Citizen.SetTimeout((i-1) * 1000, function()
+            TriggerEvent('chat:addMessage', {
+                color = countdownColors[i],
+                args = {"[DUEL]", message}
+            })
+            
+            -- Affichage grand écran
+            Citizen.CreateThread(function()
+                local startTime = GetGameTimer()
+                local duration = i == 4 and 1500 or 1000
+                local scale = i == 4 and 4.0 or 3.0
+                local color = i == 4 and {255, 0, 0} or {255, 255, 255}
+                
+                while GetGameTimer() - startTime < duration do
+                    SetTextFont(0)
+                    SetTextProportional(1)
+                    SetTextScale(scale, scale)
+                    SetTextColour(color[1], color[2], color[3], 255)
+                    SetTextDropshadow(0, 0, 0, 0, 255)
+                    SetTextEdge(2, 0, 0, 0, 150)
+                    SetTextCentre(true)
+                    SetTextEntry("STRING")
+                    AddTextComponentString(message)
+                    DrawText(0.5, 0.4)
+                    Citizen.Wait(0)
+                end
+            end)
         end)
-    end)
-    
-    Citizen.SetTimeout(2000, function()
-        TriggerEvent('chat:addMessage', {
-            color = {255, 165, 0},
-            args = {"[DUEL]", "1..."}
-        })
-        
-        -- Affichage grand écran pour 1
-        Citizen.CreateThread(function()
-            local startTime = GetGameTimer()
-            while GetGameTimer() - startTime < 1000 do
-                SetTextFont(0)
-                SetTextProportional(1)
-                SetTextScale(3.0, 3.0)
-                SetTextColour(255, 255, 255, 255)
-                SetTextDropshadow(0, 0, 0, 0, 255)
-                SetTextEdge(2, 0, 0, 0, 150)
-                SetTextCentre(true)
-                SetTextEntry("STRING")
-                AddTextComponentString("1")
-                DrawText(0.5, 0.4)
-                Citizen.Wait(0)
-            end
-        end)
-    end)
-    
-    Citizen.SetTimeout(3000, function()
-        TriggerEvent('chat:addMessage', {
-            color = {255, 0, 0},
-            args = {"[DUEL]", "GO !"}
-        })
-        
-        -- Affichage grand écran pour GO
-        Citizen.CreateThread(function()
-            local startTime = GetGameTimer()
-            while GetGameTimer() - startTime < 1500 do
-                SetTextFont(0)
-                SetTextProportional(1)
-                SetTextScale(4.0, 4.0)
-                SetTextColour(255, 0, 0, 255)
-                SetTextDropshadow(0, 0, 0, 0, 255)
-                SetTextEdge(2, 0, 0, 0, 150)
-                SetTextCentre(true)
-                SetTextEntry("STRING")
-                AddTextComponentString("GO !")
-                DrawText(0.5, 0.4)
-                Citizen.Wait(0)
-            end
-        end)
-    end)
+    end
 end)
 
 -- Event reçu pour les résultats de manche
 RegisterNetEvent('duel:roundResult')
 AddEventHandler('duel:roundResult', function(roundData)
-    print("^3[DUEL] === RÉSULTAT DE MANCHE CLIENT ===^7")
-    print("^3[DUEL] Manche: " .. roundData.currentRound .. "/" .. roundData.maxRounds .. "^7")
-    print("^3[DUEL] Score Joueur 1: " .. roundData.player1Score .. "^7")
-    print("^3[DUEL] Score Joueur 2: " .. roundData.player2Score .. "^7")
-    print("^3[DUEL] Mon ID: " .. PlayerId() .. "^7")
-    print("^3[DUEL] Joueur 1 ID: " .. roundData.player1Id .. "^7")
-    print("^3[DUEL] Joueur 2 ID: " .. roundData.player2Id .. "^7")
-    print("^3[DUEL] Tueur: " .. roundData.killerPlayerId .. "^7")
+    -- Mettre à jour les scores locaux
+    currentRounds.currentRound = roundData.currentRound
+    currentRounds.maxRounds = roundData.maxRounds
+    currentRounds.myScore = roundData.myScore
+    currentRounds.opponentScore = roundData.opponentScore
     
-    currentRounds = {
-        player1Score = roundData.player1Score,
-        player2Score = roundData.player2Score,
-        currentRound = roundData.currentRound,
-        maxRounds = roundData.maxRounds,
-        showRoundCounter = true,
-        player1Id = roundData.player1Id,
-        player2Id = roundData.player2Id
-    }
-    
-    local playerId = PlayerId()
     local playerPed = PlayerPedId()
     
-    -- HEAL + KEVLAR pour TOUS LES JOUEURS à la fin de chaque manche (avec délai)
+    -- Heal + Kevlar après chaque manche
     Citizen.SetTimeout(1000, function()
         if inDuel then
             SetEntityHealth(playerPed, 200)
             SetPedArmour(playerPed, 100)
-            print("^2[DUEL] Heal + Kevlar appliqué au joueur " .. playerId .. "^7")
         end
     end)
     
-    -- Déterminer qui je suis et afficher le bon message
-    local amIPlayer1 = (playerId == roundData.player1Id)
-    local roundWinner = ""
+    -- Message de résultat de manche
     local roundMessage = ""
+    local messageColor = {255, 165, 0}
     
-    if playerId == roundData.player1Id then
-        -- Je suis le joueur 1
-        if roundData.killerPlayerId == playerId then
-            roundMessage = "🏆 Vous gagnez la manche " .. roundData.currentRound .. " ! Score: " .. roundData.player1Score .. "-" .. roundData.player2Score
-        else
-            roundMessage = "💀 Vous perdez la manche " .. roundData.currentRound .. " ! Score: " .. roundData.player1Score .. "-" .. roundData.player2Score
-        end
+    if roundData.amIWinner then
+        roundMessage = "🏆 Vous gagnez la manche " .. roundData.currentRound .. " ! Score: " .. roundData.myScore .. "-" .. roundData.opponentScore
+        messageColor = {0, 255, 0}
     else
-        -- Je suis le joueur 2
-        if roundData.killerPlayerId == playerId then
-            roundMessage = "🏆 Vous gagnez la manche " .. roundData.currentRound .. " ! Score: " .. roundData.player2Score .. "-" .. roundData.player1Score
-        else
-            roundMessage = "💀 Vous perdez la manche " .. roundData.currentRound .. " ! Score: " .. roundData.player2Score .. "-" .. roundData.player1Score
-        end
+        roundMessage = "💀 Vous perdez la manche " .. roundData.currentRound .. " ! Score: " .. roundData.myScore .. "-" .. roundData.opponentScore
+        messageColor = {255, 165, 0}
     end
     
     TriggerEvent('chat:addMessage', {
-        color = roundData.killerPlayerId == playerId and {0, 255, 0} or {255, 165, 0},
-        multiline = true,
+        color = messageColor,
         args = {"[DUEL]", roundMessage}
     })
     
     -- Si le duel est terminé
     if roundData.duelFinished then
-        currentRounds.showRoundCounter = false
+        currentRounds.showCounter = false
         
         local finalMessage = ""
-        local finalColor = {255, 255, 0} -- Jaune par défaut (égalité)
+        local finalColor = {255, 255, 0}
         
         if roundData.winner then
-            if roundData.winner == playerId then
-                -- Je gagne
-                if playerId == roundData.player1Id then
-                    finalMessage = "🏆 VICTOIRE FINALE ! Vous avez gagné le duel " .. roundData.player1Score .. "-" .. roundData.player2Score .. " !"
-                else
-                    finalMessage = "🏆 VICTOIRE FINALE ! Vous avez gagné le duel " .. roundData.player2Score .. "-" .. roundData.player1Score .. " !"
-                end
-                finalColor = {0, 255, 0} -- Vert
+            if roundData.amIWinner then
+                finalMessage = "🏆 VICTOIRE FINALE ! Vous avez gagné le duel " .. roundData.myScore .. "-" .. roundData.opponentScore .. " !"
+                finalColor = {0, 255, 0}
             else
-                -- Je perds
-                if playerId == roundData.player1Id then
-                    finalMessage = "💀 DÉFAITE FINALE ! " .. roundData.winnerName .. " a gagné " .. roundData.player2Score .. "-" .. roundData.player1Score
-                else
-                    finalMessage = "💀 DÉFAITE FINALE ! " .. roundData.winnerName .. " a gagné " .. roundData.player1Score .. "-" .. roundData.player2Score
-                end
-                finalColor = {255, 0, 0} -- Rouge
+                finalMessage = "💀 DÉFAITE FINALE ! " .. roundData.winnerName .. " a gagné " .. roundData.opponentScore .. "-" .. roundData.myScore
+                finalColor = {255, 0, 0}
             end
         else
-            -- Égalité
-            if playerId == roundData.player1Id then
-                finalMessage = "🤝 ÉGALITÉ ! Duel terminé " .. roundData.player1Score .. "-" .. roundData.player2Score
-            else
-                finalMessage = "🤝 ÉGALITÉ ! Duel terminé " .. roundData.player2Score .. "-" .. roundData.player1Score
-            end
+            finalMessage = "🤝 ÉGALITÉ ! Duel terminé " .. roundData.myScore .. "-" .. roundData.opponentScore
         end
         
         TriggerEvent('chat:addMessage', {
             color = finalColor,
-            multiline = true,
             args = {"[DUEL]", finalMessage}
         })
-        
-        -- Quitter automatiquement après 3 secondes
-        Citizen.SetTimeout(3000, function()
-            if inDuel then
-                quitDuel()
-            end
-        end)
     end
 end)
 
-print("^2[DUEL] Client script complètement initialisé^7")
+print("^2[DUEL] Client script initialisé^7")

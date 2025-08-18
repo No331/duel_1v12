@@ -1,15 +1,12 @@
 print("^2[DUEL] Server script chargé^7")
 
--- Debug pour vérifier l'enregistrement des events
-print("^2[DUEL] Enregistrement de l'event duel:playerDied^7")
-
 -- Système d'instances
 local instances = {}
 local nextInstanceId = 1
 
 -- Configuration du système de manches
-local MAX_ROUNDS = 5 -- Maximum 5 manches
-local ROUNDS_TO_WIN = 3 -- Premier à 3 manches gagne
+local MAX_ROUNDS = 5
+local ROUNDS_TO_WIN = 3
 
 -- Fonction pour créer une nouvelle instance
 function createInstance(playerId, arenaType, weapon)
@@ -23,14 +20,13 @@ function createInstance(playerId, arenaType, weapon)
         weapon = weapon,
         players = {playerId},
         maxPlayers = 2,
-        status = "waiting", -- waiting, full, active
+        status = "waiting",
         created = os.time(),
         rounds = {
-            player1Score = 0,
-            player2Score = 0,
             currentRound = 0,
-            maxRounds = 5,
-            roundsToWin = ROUNDS_TO_WIN
+            maxRounds = MAX_ROUNDS,
+            scores = {},
+            isActive = false
         }
     }
     
@@ -42,10 +38,18 @@ end
 function deleteInstance(instanceId)
     if instances[instanceId] then
         local instance = instances[instanceId]
-        print("^1[DUEL] Instance " .. instanceId .. " supprimée (créateur: " .. instance.creator .. ", arène: " .. instance.arena .. ")^7")
+        
+        -- Notifier tous les joueurs de l'instance
+        for _, playerId in ipairs(instance.players) do
+            TriggerClientEvent('duel:instanceDeleted', playerId)
+        end
+        
+        print("^1[DUEL] Instance " .. instanceId .. " supprimée^7")
         instances[instanceId] = nil
-    else
-        print("^1[DUEL] Tentative de suppression d'une instance inexistante: " .. instanceId .. "^7")
+        
+        -- Mettre à jour la liste des arènes disponibles
+        local availableArenas = getAvailableArenas()
+        TriggerClientEvent('duel:updateAvailableArenas', -1, availableArenas)
     end
 end
 
@@ -61,7 +65,7 @@ function getPlayerInstance(playerId)
     return nil, nil
 end
 
--- Fonction pour obtenir les arènes disponibles (en attente de joueurs)
+-- Fonction pour obtenir les arènes disponibles
 function getAvailableArenas()
     local available = {}
     for instanceId, instance in pairs(instances) do
@@ -101,9 +105,20 @@ function addPlayerToInstance(instanceId, playerId)
     
     table.insert(instance.players, playerId)
     
-    -- Si l'instance est maintenant pleine, changer le statut
+    -- Initialiser le score du joueur
+    instance.rounds.scores[playerId] = 0
+    
+    -- Si l'instance est maintenant pleine, changer le statut et activer les manches
     if #instance.players >= instance.maxPlayers then
-        instance.status = "full"
+        instance.status = "active"
+        instance.rounds.isActive = true
+        
+        -- Initialiser les scores pour tous les joueurs
+        for _, pid in ipairs(instance.players) do
+            instance.rounds.scores[pid] = 0
+        end
+        
+        print("^2[DUEL] Instance " .. instanceId .. " maintenant active avec " .. #instance.players .. " joueurs^7")
     end
     
     return true, "Joueur ajouté avec succès"
@@ -113,337 +128,198 @@ end
 function handlePlayerDeath(instanceId, deadPlayerId, killerPlayerId)
     local instance = instances[instanceId]
     if not instance then 
-        print("^1[DUEL] ERREUR: Instance " .. instanceId .. " non trouvée^7")
+        print("^1[DUEL] Instance " .. instanceId .. " non trouvée^7")
         return 
     end
     
+    -- Vérifier que l'instance est active
+    if not instance.rounds.isActive then
+        print("^1[DUEL] Instance " .. instanceId .. " non active^7")
+        return
+    end
+    
     -- Vérifier qu'on a bien 2 joueurs
-    if #instance.players < 2 then
-        print("^1[DUEL] ERREUR: Pas assez de joueurs dans l'instance (" .. #instance.players .. "/2)^7")
+    if #instance.players ~= 2 then
+        print("^1[DUEL] Instance " .. instanceId .. " n'a pas exactement 2 joueurs^7")
         return
     end
     
-    -- Vérifier qu'on a un tueur valide et différent du mort
-    if not killerPlayerId or killerPlayerId == deadPlayerId or killerPlayerId == 0 then
-        print("^1[DUEL] ERREUR: Mort sans tueur valide, pas de point marqué^7")
-        print("^1[DUEL] KillerPlayerId: " .. tostring(killerPlayerId) .. ", DeadPlayerId: " .. tostring(deadPlayerId) .. "^7")
+    -- Vérifier que le tueur est valide et différent du mort
+    if not killerPlayerId or killerPlayerId == deadPlayerId then
+        print("^1[DUEL] Tueur invalide ou suicide - pas de point^7")
         return
     end
     
-    -- Déterminer qui est le joueur 1 et qui est le joueur 2
-    local player1Id = instance.players[1]
-    local player2Id = instance.players[2]
+    -- Vérifier que le tueur fait partie du duel
+    local killerInDuel = false
+    for _, pid in ipairs(instance.players) do
+        if pid == killerPlayerId then
+            killerInDuel = true
+            break
+        end
+    end
     
-    print("^2[DUEL] === ANALYSE DE LA MANCHE ===^7")
-    print("^3[DUEL] Joueur 1 (créateur): " .. player1Id .. "^7")
-    print("^3[DUEL] Joueur 2: " .. player2Id .. "^7")
-    print("^3[DUEL] Tueur: " .. killerPlayerId .. "^7")
-    print("^3[DUEL] Mort: " .. deadPlayerId .. "^7")
-    
-    -- Vérifier que le tueur est bien un des 2 joueurs du duel
-    if killerPlayerId ~= player1Id and killerPlayerId ~= player2Id then
-        print("^1[DUEL] ERREUR: Le tueur (" .. killerPlayerId .. ") n'est pas un joueur du duel^7")
+    if not killerInDuel then
+        print("^1[DUEL] Le tueur " .. killerPlayerId .. " ne fait pas partie du duel^7")
         return
     end
     
-    -- Incrémenter le round
+    -- Incrémenter la manche
     instance.rounds.currentRound = instance.rounds.currentRound + 1
-    print("^2[DUEL] NOUVELLE MANCHE: " .. instance.rounds.currentRound .. "/" .. MAX_ROUNDS .. "^7")
     
-    -- Incrémenter le score du tueur selon son index dans la liste
-    if killerPlayerId == player1Id then
-        instance.rounds.player1Score = instance.rounds.player1Score + 1
-        print("^2[DUEL] ✅ JOUEUR 1 (" .. GetPlayerName(player1Id) .. ") gagne la manche " .. instance.rounds.currentRound .. " !^7")
-        print("^2[DUEL] Score actuel: " .. instance.rounds.player1Score .. "-" .. instance.rounds.player2Score .. "^7")
-    elseif killerPlayerId == player2Id then
-        instance.rounds.player2Score = instance.rounds.player2Score + 1
-        print("^2[DUEL] ✅ JOUEUR 2 (" .. GetPlayerName(player2Id) .. ") gagne la manche " .. instance.rounds.currentRound .. " !^7")
-        print("^2[DUEL] Score actuel: " .. instance.rounds.player1Score .. "-" .. instance.rounds.player2Score .. "^7")
-    else
-        print("^1[DUEL] ERREUR: Le tueur n'est ni joueur 1 ni joueur 2^7")
-        return
-    end
+    -- Ajouter un point au tueur
+    instance.rounds.scores[killerPlayerId] = (instance.rounds.scores[killerPlayerId] or 0) + 1
     
-    -- Vérifier si quelqu'un a gagné
+    local killerScore = instance.rounds.scores[killerPlayerId]
+    local deadScore = instance.rounds.scores[deadPlayerId] or 0
+    
+    print("^2[DUEL] Manche " .. instance.rounds.currentRound .. "/" .. MAX_ROUNDS .. " - Tueur: " .. killerPlayerId .. " (Score: " .. killerScore .. ") - Mort: " .. deadPlayerId .. " (Score: " .. deadScore .. ")^7")
+    
+    -- Vérifier les conditions de fin
+    local duelFinished = false
     local winner = nil
     local winnerName = ""
-    local loserName = ""
-    local duelFinished = false
     
-    -- Vérifier si quelqu'un a gagné (3 manches) OU si on a atteint 5 manches
-    if instance.rounds.player1Score >= ROUNDS_TO_WIN then
-        winner = instance.players[1]
-        winnerName = GetPlayerName(instance.players[1]) or "Joueur " .. instance.players[1]
-        loserName = GetPlayerName(instance.players[2]) or "Joueur " .. instance.players[2]
+    -- Quelqu'un a atteint le nombre de manches pour gagner
+    if killerScore >= ROUNDS_TO_WIN then
         duelFinished = true
-        print("^2[DUEL] Joueur 1 gagne le duel !^7")
-    elseif instance.rounds.player2Score >= ROUNDS_TO_WIN then
-        winner = instance.players[2]
-        winnerName = GetPlayerName(instance.players[2]) or "Joueur " .. instance.players[2]
-        loserName = GetPlayerName(instance.players[1]) or "Joueur " .. instance.players[1]
-        duelFinished = true
-        print("^2[DUEL] Joueur 2 gagne le duel !^7")
+        winner = killerPlayerId
+        winnerName = GetPlayerName(killerPlayerId) or ("Joueur " .. killerPlayerId)
+        print("^2[DUEL] " .. winnerName .. " gagne le duel avec " .. killerScore .. " manches !^7")
+    -- On a atteint le maximum de manches
     elseif instance.rounds.currentRound >= MAX_ROUNDS then
-        -- Si on a fait 5 manches, celui avec le plus de points gagne
-        if instance.rounds.player1Score > instance.rounds.player2Score then
-            winner = instance.players[1]
-            winnerName = GetPlayerName(instance.players[1]) or "Joueur " .. instance.players[1]
-            loserName = GetPlayerName(instance.players[2]) or "Joueur " .. instance.players[2]
-            print("^2[DUEL] Joueur 1 gagne aux points !^7")
-        elseif instance.rounds.player2Score > instance.rounds.player1Score then
-            winner = instance.players[2]
-            winnerName = GetPlayerName(instance.players[2]) or "Joueur " .. instance.players[2]
-            loserName = GetPlayerName(instance.players[1]) or "Joueur " .. instance.players[1]
-            print("^2[DUEL] Joueur 2 gagne aux points !^7")
-        else
-            -- Égalité - pas de gagnant
-            winner = nil
-            winnerName = "Égalité"
-            print("^3[DUEL] Duel terminé en égalité !^7")
-        end
         duelFinished = true
+        
+        -- Trouver le joueur avec le plus de points
+        local maxScore = 0
+        local winners = {}
+        
+        for playerId, score in pairs(instance.rounds.scores) do
+            if score > maxScore then
+                maxScore = score
+                winners = {playerId}
+            elseif score == maxScore then
+                table.insert(winners, playerId)
+            end
+        end
+        
+        if #winners == 1 then
+            winner = winners[1]
+            winnerName = GetPlayerName(winner) or ("Joueur " .. winner)
+            print("^2[DUEL] " .. winnerName .. " gagne aux points avec " .. maxScore .. " manches !^7")
+        else
+            print("^3[DUEL] Égalité parfaite !^7")
+        end
     end
     
-    print("^3[DUEL] Envoi des scores - Manche " .. instance.rounds.currentRound .. "/" .. MAX_ROUNDS .. " - Score: " .. instance.rounds.player1Score .. "-" .. instance.rounds.player2Score .. "^7")
-    
-    -- Envoyer les scores aux joueurs
+    -- Envoyer les résultats aux joueurs
     for _, playerId in ipairs(instance.players) do
+        local playerScore = instance.rounds.scores[playerId] or 0
+        local opponentId = nil
+        local opponentScore = 0
+        
+        -- Trouver l'adversaire
+        for _, pid in ipairs(instance.players) do
+            if pid ~= playerId then
+                opponentId = pid
+                opponentScore = instance.rounds.scores[pid] or 0
+                break
+            end
+        end
+        
         TriggerClientEvent('duel:roundResult', playerId, {
-            player1Score = instance.rounds.player1Score,
-            player2Score = instance.rounds.player2Score,
             currentRound = instance.rounds.currentRound,
             maxRounds = MAX_ROUNDS,
-            winner = winner,
-            winnerName = winnerName,
-            loserName = loserName,
+            myScore = playerScore,
+            opponentScore = opponentScore,
             killerPlayerId = killerPlayerId,
             deadPlayerId = deadPlayerId,
             duelFinished = duelFinished,
-            player1Id = player1Id,
-            player2Id = player2Id
+            winner = winner,
+            winnerName = winnerName,
+            amIWinner = (winner == playerId)
         })
     end
     
-    -- Si quelqu'un a gagné, terminer le duel
+    -- Si le duel est terminé, supprimer l'instance après un délai
     if duelFinished then
-        if winner then
-            print("^2[DUEL] " .. winnerName .. " a gagné le duel " .. instance.rounds.player1Score .. "-" .. instance.rounds.player2Score .. "^7")
-        else
-            print("^3[DUEL] Duel terminé en égalité " .. instance.rounds.player1Score .. "-" .. instance.rounds.player2Score .. "^7")
-        end
+        instance.rounds.isActive = false
         
-        -- Attendre 3 secondes puis supprimer l'instance
-        Citizen.SetTimeout(3000, function()
+        Citizen.SetTimeout(5000, function()
             deleteInstance(instanceId)
         end)
     end
 end
 
 -- Event pour signaler une mort
-print("^2[DUEL] === ENREGISTREMENT EVENT PLAYERDIED ===^7")
 RegisterNetEvent('duel:playerDied')
 AddEventHandler('duel:playerDied', function(killerPlayerId)
     local source = source
-    local deadPlayerName = GetPlayerName(source) or "Joueur " .. source
-    local killerPlayerName = GetPlayerName(killerPlayerId) or "Joueur " .. killerPlayerId
     
-    print("^2[DUEL] ========== EVENT PLAYERDIED RECU ==========^7")
-    print("^2[DUEL] Source (mort): " .. source .. " (" .. deadPlayerName .. ")^7")
-    print("^2[DUEL] Killer: " .. tostring(killerPlayerId) .. " (" .. killerPlayerName .. ")^7")
+    print("^2[DUEL] Mort signalée - Mort: " .. source .. ", Tueur: " .. tostring(killerPlayerId) .. "^7")
     
-    -- Trouver l'instance du joueur mort
     local instanceId, instance = getPlayerInstance(source)
     if instanceId and instance then
-        print("^2[DUEL] Instance " .. instanceId .. " trouvée avec " .. #instance.players .. " joueurs^7")
-        print("^2[DUEL] Joueurs dans l'instance: " .. table.concat(instance.players, ", ") .. "^7")
         handlePlayerDeath(instanceId, source, killerPlayerId)
     else
-        print("^1[DUEL] ERREUR: Aucune instance trouvée pour le joueur mort " .. source .. "^7")
-        -- Debug: lister toutes les instances
-        print("^1[DUEL] Instances actives:^7")
-        for id, inst in pairs(instances) do
-            print("^1[DUEL]   Instance " .. id .. ": joueurs " .. table.concat(inst.players, ", ") .. "^7")
-        end
+        print("^1[DUEL] Aucune instance trouvée pour le joueur mort " .. source .. "^7")
     end
-    print("^2[DUEL] ========== FIN EVENT PLAYERDIED ==========^7")
 end)
-print("^2[DUEL] Event duel:playerDied enregistré avec succès^7")
 
--- Commande de test pour vérifier la communication client-serveur
-print("^2[DUEL] Enregistrement de la commande testduel^7")
-RegisterCommand('testduel', function(source, args, rawCommand)
-    local playerName = GetPlayerName(source) or "Joueur " .. source
-    print("^2[DUEL] Commande testduel reçue de " .. playerName .. " (ID: " .. source .. ")^7")
-    
-    if source ~= 0 then
-        TriggerClientEvent('chat:addMessage', source, {
-            color = {0, 255, 0},
-            multiline = true,
-            args = {"[DUEL]", "Communication serveur OK !"}
-        })
-    end
-end, false)
-
--- Event pour rejoindre une arène (créer une instance)
-print("^2[DUEL] Enregistrement de l'event duel:createArena^7")
+-- Event pour créer une arène
 RegisterNetEvent('duel:createArena')
 AddEventHandler('duel:createArena', function(weapon, map)
     local source = source
-    local playerName = GetPlayerName(source) or "Joueur " .. source
+    local playerName = GetPlayerName(source) or ("Joueur " .. source)
     
-    print("^2[DUEL] ========== EVENT CREATEARENA SERVEUR ==========^7")
-    print("^2[DUEL] Joueur: " .. playerName .. " (ID: " .. source .. ")^7")
-    print("^2[DUEL] Paramètres reçus:^7")
-    print("^2[DUEL]   weapon = " .. tostring(weapon) .. " (type: " .. type(weapon) .. ")^7")
-    print("^2[DUEL]   map = " .. tostring(map) .. " (type: " .. type(map) .. ")^7")
-    
-    -- Vérifier que les paramètres sont valides
-    if not weapon or not map then
-        print("^1[DUEL] Paramètres invalides - weapon: " .. tostring(weapon) .. ", map: " .. tostring(map) .. "^7")
-        return
-    end
-    
-    print("^2[DUEL] Paramètres valides, vérification instance existante^7")
+    print("^2[DUEL] " .. playerName .. " crée une arène - Arme: " .. weapon .. ", Map: " .. map .. "^7")
     
     -- Vérifier si le joueur est déjà dans une instance
     local currentInstanceId, currentInstance = getPlayerInstance(source)
     if currentInstanceId then
-        print("^1[DUEL] Joueur " .. source .. " déjà dans l'instance " .. currentInstanceId .. "^7")
-        -- Supprimer l'ancienne instance et en créer une nouvelle
         deleteInstance(currentInstanceId)
-    else
-        print("^2[DUEL] Aucune instance existante pour le joueur^7")
     end
     
-    print("^2[DUEL] Création de la nouvelle instance d'arène^7")
-    -- Créer une nouvelle instance en attente
+    -- Créer une nouvelle instance
     local instanceId = createInstance(source, map, weapon)
-    
-    print("^2[DUEL] Instance " .. instanceId .. " créée avec succès pour " .. playerName .. "^7")
-    print("^2[DUEL] Joueurs dans la nouvelle instance: " .. table.concat(instances[instanceId].players, ", ") .. "^7")
-    print("^2[DUEL] Envoi de l'event duel:instanceCreated au client^7")
     
     -- Confirmer au client
     TriggerClientEvent('duel:instanceCreated', source, instanceId, weapon, map)
     
-    -- Notifier tous les clients de la mise à jour des arènes disponibles
+    -- Mettre à jour la liste des arènes disponibles
     local availableArenas = getAvailableArenas()
     TriggerClientEvent('duel:updateAvailableArenas', -1, availableArenas)
-    
-    print("^2[DUEL] ========== FIN EVENT CREATEARENA ==========^7")
 end)
-print("^2[DUEL] Event duel:createArena enregistré avec succès^7")
-
--- Event pour rejoindre une arène existante
-print("^2[DUEL] Enregistrement de l'event duel:joinArena^7")
-RegisterNetEvent('duel:joinArena')
-AddEventHandler('duel:joinArena', function(weapon)
-    local source = source
-    local playerName = GetPlayerName(source) or "Joueur " .. source
-    
-    print("^2[DUEL] ========== EVENT JOINARENA SERVEUR ==========^7")
-    print("^2[DUEL] Joueur: " .. playerName .. " (ID: " .. source .. ") veut rejoindre une arène^7")
-    print("^2[DUEL] Arme sélectionnée: " .. tostring(weapon) .. "^7")
-    
-    -- Vérifier si le joueur est déjà dans une instance
-    local currentInstanceId, currentInstance = getPlayerInstance(source)
-    if currentInstanceId then
-        print("^1[DUEL] Joueur " .. source .. " déjà dans l'instance " .. currentInstanceId .. "^7")
-        return
-    end
-    
-    -- Trouver une arène disponible avec la même arme
-    local targetInstanceId = nil
-    for instanceId, instance in pairs(instances) do
-        if instance.status == "waiting" and instance.weapon == weapon and #instance.players < instance.maxPlayers then
-            targetInstanceId = instanceId
-            break
-        end
-    end
-    
-    if not targetInstanceId then
-        print("^1[DUEL] Aucune arène disponible avec l'arme " .. weapon .. "^7")
-        TriggerClientEvent('chat:addMessage', source, {
-            color = {255, 0, 0},
-            multiline = true,
-            args = {"[DUEL]", "Aucune arène disponible avec cette arme. Créez votre propre arène !"}
-        })
-        return
-    end
-    
-    -- Ajouter le joueur à l'instance
-    local success, message = addPlayerToInstance(targetInstanceId, source)
-    if not success then
-        print("^1[DUEL] Impossible d'ajouter le joueur à l'instance: " .. message .. "^7")
-        return
-    end
-    
-    local instance = instances[targetInstanceId]
-    print("^2[DUEL] Joueur " .. source .. " ajouté à l'instance " .. targetInstanceId .. "^7")
-    
-    -- Téléporter le joueur vers l'arène
-    TriggerClientEvent('duel:instanceCreated', source, targetInstanceId, weapon, instance.arena)
-    
-    -- Notifier le créateur qu'un adversaire a rejoint
-    local creatorName = GetPlayerName(instance.creator) or "Joueur " .. instance.creator
-    TriggerClientEvent('duel:opponentJoined', instance.creator, playerName)
-    TriggerClientEvent('duel:opponentJoined', source, creatorName)
-    
-    -- Mettre à jour la liste des arènes disponibles pour tous
-    local availableArenas = getAvailableArenas()
-    TriggerClientEvent('duel:updateAvailableArenas', -1, availableArenas)
-    
-    print("^2[DUEL] ========== FIN EVENT JOINARENA ==========^7")
-end)
-print("^2[DUEL] Event duel:joinArena enregistré avec succès^7")
 
 -- Event pour rejoindre une arène spécifique
-print("^2[DUEL] Enregistrement de l'event duel:joinSpecificArena^7")
 RegisterNetEvent('duel:joinSpecificArena')
 AddEventHandler('duel:joinSpecificArena', function(arenaId, weapon)
     local source = source
-    local playerName = GetPlayerName(source) or "Joueur " .. source
+    local playerName = GetPlayerName(source) or ("Joueur " .. source)
     
-    print("^2[DUEL] ========== EVENT JOIN SPECIFIC ARENA ==========^7")
-    print("^2[DUEL] Joueur: " .. playerName .. " (ID: " .. source .. ") veut rejoindre l'arène " .. arenaId .. "^7")
-    print("^2[DUEL] Arme sélectionnée: " .. tostring(weapon) .. "^7")
+    print("^2[DUEL] " .. playerName .. " rejoint l'arène " .. arenaId .. "^7")
     
     -- Vérifier si le joueur est déjà dans une instance
     local currentInstanceId, currentInstance = getPlayerInstance(source)
     if currentInstanceId then
-        print("^1[DUEL] Joueur " .. source .. " déjà dans l'instance " .. currentInstanceId .. "^7")
+        print("^1[DUEL] Joueur déjà dans une instance^7")
         return
     end
     
-    -- Vérifier que l'arène existe
+    -- Vérifier que l'arène existe et est disponible
     local targetInstance = instances[arenaId]
-    if not targetInstance then
-        print("^1[DUEL] Arène " .. arenaId .. " non trouvée^7")
+    if not targetInstance or targetInstance.status ~= "waiting" or #targetInstance.players >= targetInstance.maxPlayers then
         TriggerClientEvent('chat:addMessage', source, {
             color = {255, 0, 0},
-            multiline = true,
-            args = {"[DUEL]", "Cette arène n'existe plus !"}
-        })
-        return
-    end
-    
-    -- Vérifier que l'arène est disponible
-    if targetInstance.status ~= "waiting" or #targetInstance.players >= targetInstance.maxPlayers then
-        print("^1[DUEL] Arène " .. arenaId .. " non disponible (statut: " .. targetInstance.status .. ", joueurs: " .. #targetInstance.players .. ")^7")
-        TriggerClientEvent('chat:addMessage', source, {
-            color = {255, 0, 0},
-            multiline = true,
             args = {"[DUEL]", "Cette arène n'est plus disponible !"}
         })
         return
     end
     
-    -- Vérifier que l'arme correspond
+    -- Vérifier la compatibilité de l'arme
     if targetInstance.weapon ~= weapon then
-        print("^1[DUEL] Arme incompatible pour l'arène " .. arenaId .. " (attendu: " .. targetInstance.weapon .. ", reçu: " .. weapon .. ")^7")
         TriggerClientEvent('chat:addMessage', source, {
             color = {255, 0, 0},
-            multiline = true,
             args = {"[DUEL]", "Arme incompatible avec cette arène !"}
         })
         return
@@ -452,53 +328,42 @@ AddEventHandler('duel:joinSpecificArena', function(arenaId, weapon)
     -- Ajouter le joueur à l'instance
     local success, message = addPlayerToInstance(arenaId, source)
     if not success then
-        print("^1[DUEL] Impossible d'ajouter le joueur à l'instance: " .. message .. "^7")
+        print("^1[DUEL] Erreur: " .. message .. "^7")
         return
     end
-    
-    print("^2[DUEL] Joueur " .. source .. " ajouté à l'arène " .. arenaId .. "^7")
     
     -- Téléporter le joueur vers l'arène
     TriggerClientEvent('duel:instanceCreated', source, arenaId, weapon, targetInstance.arena)
     
-    -- Notifier le créateur qu'un adversaire a rejoint
-    local creatorName = GetPlayerName(targetInstance.creator) or "Joueur " .. targetInstance.creator
+    -- Notifier les joueurs qu'un adversaire a rejoint
+    local creatorName = GetPlayerName(targetInstance.creator) or ("Joueur " .. targetInstance.creator)
     TriggerClientEvent('duel:opponentJoined', targetInstance.creator, playerName)
     TriggerClientEvent('duel:opponentJoined', source, creatorName)
     
-    -- Mettre à jour la liste des arènes disponibles pour tous
+    -- Mettre à jour la liste des arènes disponibles
     local availableArenas = getAvailableArenas()
     TriggerClientEvent('duel:updateAvailableArenas', -1, availableArenas)
-    
-    print("^2[DUEL] ========== FIN EVENT JOIN SPECIFIC ARENA ==========^7")
 end)
-print("^2[DUEL] Event duel:joinSpecificArena enregistré avec succès^7")
 
 -- Event pour obtenir les arènes disponibles
 RegisterNetEvent('duel:getAvailableArenas')
 AddEventHandler('duel:getAvailableArenas', function()
     local source = source
     local availableArenas = getAvailableArenas()
-    print("^3[DUEL] Envoi de " .. #availableArenas .. " arène(s) disponible(s) au joueur " .. source .. "^7")
     TriggerClientEvent('duel:updateAvailableArenas', source, availableArenas)
 end)
 
--- Event pour quitter une arène (supprimer l'instance)
+-- Event pour quitter une arène
 RegisterNetEvent('duel:quitArena')
 AddEventHandler('duel:quitArena', function()
     local source = source
-    local playerName = GetPlayerName(source) or "Joueur " .. source
+    local playerName = GetPlayerName(source) or ("Joueur " .. source)
     
-    print("^3[DUEL] " .. playerName .. " (ID: " .. source .. ") quitte son arène^7")
+    print("^3[DUEL] " .. playerName .. " quitte son arène^7")
     
-    -- Trouver et supprimer l'instance du joueur
     local instanceId, instance = getPlayerInstance(source)
     if instanceId then
-        print("^3[DUEL] Suppression de l'instance " .. instanceId .. " pour le joueur " .. source .. "^7")
         deleteInstance(instanceId)
-        TriggerClientEvent('duel:instanceDeleted', source)
-    else
-        print("^1[DUEL] Aucune instance trouvée pour le joueur " .. source .. "^7")
     end
 end)
 
@@ -507,14 +372,11 @@ AddEventHandler('playerDropped', function(reason)
     local source = source
     local playerName = GetPlayerName(source) or "Joueur inconnu"
     
-    print("^1[DUEL] " .. playerName .. " s'est déconnecté, nettoyage de son instance^7")
+    print("^1[DUEL] " .. playerName .. " s'est déconnecté^7")
     
     local instanceId, instance = getPlayerInstance(source)
     if instanceId then
-        print("^1[DUEL] Suppression de l'instance " .. instanceId .. " suite à déconnexion de " .. playerName .. "^7")
         deleteInstance(instanceId)
-    else
-        print("^3[DUEL] Aucune instance à nettoyer pour " .. playerName .. "^7")
     end
 end)
 
@@ -526,9 +388,8 @@ RegisterCommand('duel_instances', function(source, args, rawCommand)
         for instanceId, instance in pairs(instances) do
             count = count + 1
             local creatorName = GetPlayerName(instance.creator) or "Joueur déconnecté"
-            local timeElapsed = os.time() - instance.created
-            print("^3  Instance " .. instanceId .. ": " .. creatorName .. " (" .. instance.creator .. ") - Arène: " .. instance.arena .. " - Arme: " .. instance.weapon .. "^7")
-            print("^3    Joueurs: " .. #instance.players .. "/" .. instance.maxPlayers .. " - Statut: " .. instance.status .. " - Créée il y a " .. timeElapsed .. " secondes^7")
+            print("^3  Instance " .. instanceId .. ": " .. creatorName .. " - Arène: " .. instance.arena .. " - Statut: " .. instance.status .. "^7")
+            print("^3    Joueurs: " .. #instance.players .. "/" .. instance.maxPlayers .. " - Manche: " .. instance.rounds.currentRound .. "/" .. instance.rounds.maxRounds .. "^7")
         end
         if count == 0 then
             print("^1  Aucune instance active^7")
@@ -537,38 +398,10 @@ RegisterCommand('duel_instances', function(source, args, rawCommand)
         if source ~= 0 then
             TriggerClientEvent('chat:addMessage', source, {
                 color = {0, 255, 0},
-                multiline = true,
                 args = {"[DUEL]", count .. " instance(s) active(s). Voir console F8 pour détails."}
             })
         end
     end
 end, false)
 
--- Nettoyage automatique des instances anciennes (toutes les 2 heures)
-Citizen.CreateThread(function()
-    while true do
-        Citizen.Wait(7200000) -- 2 heures
-        
-        local currentTime = os.time()
-        local toDelete = {}
-        
-        for instanceId, instance in pairs(instances) do
-            -- Supprimer les instances de plus de 2 heures
-            if currentTime - instance.created > 7200 then
-                table.insert(toDelete, instanceId)
-            end
-        end
-        
-        for _, instanceId in ipairs(toDelete) do
-            print("^1[DUEL] Instance " .. instanceId .. " supprimée automatiquement (trop ancienne - plus de 2h)^7")
-            -- Informer le joueur que son instance a été supprimée
-            local instance = instances[instanceId]
-            if instance and instance.creator then
-                TriggerClientEvent('duel:instanceDeleted', instance.creator)
-            end
-            deleteInstance(instanceId)
-        end
-    end
-end)
-
-print("^2[DUEL] Server script complètement initialisé^7")
+print("^2[DUEL] Server script initialisé^7")
