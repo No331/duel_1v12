@@ -6,7 +6,6 @@ local nextInstanceId = 1
 
 -- Configuration du système de manches
 local MAX_ROUNDS = 5
-local ROUNDS_TO_WIN = 3
 
 -- Fonction pour créer une nouvelle instance
 function createInstance(playerId, arenaType, weapon)
@@ -25,7 +24,7 @@ function createInstance(playerId, arenaType, weapon)
         rounds = {
             currentRound = 0,
             maxRounds = MAX_ROUNDS,
-            scores = {},
+            playerScores = {},
             isActive = false
         }
     }
@@ -105,17 +104,17 @@ function addPlayerToInstance(instanceId, playerId)
     
     table.insert(instance.players, playerId)
     
-    -- Initialiser le score du joueur
-    instance.rounds.scores[playerId] = 0
+    -- Initialiser le score du joueur à 0
+    instance.rounds.playerScores[playerId] = 0
     
     -- Si l'instance est maintenant pleine, changer le statut et activer les manches
     if #instance.players >= instance.maxPlayers then
         instance.status = "active"
         instance.rounds.isActive = true
         
-        -- Initialiser les scores pour tous les joueurs
+        -- S'assurer que tous les joueurs ont un score initialisé
         for _, pid in ipairs(instance.players) do
-            instance.rounds.scores[pid] = 0
+            instance.rounds.playerScores[pid] = 0
         end
         
         print("^2[DUEL] Instance " .. instanceId .. " maintenant active avec " .. #instance.players .. " joueurs^7")
@@ -167,34 +166,28 @@ function handlePlayerDeath(instanceId, deadPlayerId, killerPlayerId)
     -- Incrémenter la manche
     instance.rounds.currentRound = instance.rounds.currentRound + 1
     
-    -- Ajouter un point au tueur
-    instance.rounds.scores[killerPlayerId] = (instance.rounds.scores[killerPlayerId] or 0) + 1
+    -- Ajouter 1 point au tueur
+    instance.rounds.playerScores[killerPlayerId] = (instance.rounds.playerScores[killerPlayerId] or 0) + 1
     
-    local killerScore = instance.rounds.scores[killerPlayerId]
-    local deadScore = instance.rounds.scores[deadPlayerId] or 0
+    local killerScore = instance.rounds.playerScores[killerPlayerId]
+    local deadScore = instance.rounds.playerScores[deadPlayerId] or 0
     
     print("^2[DUEL] Manche " .. instance.rounds.currentRound .. "/" .. MAX_ROUNDS .. " - Tueur: " .. killerPlayerId .. " (Score: " .. killerScore .. ") - Mort: " .. deadPlayerId .. " (Score: " .. deadScore .. ")^7")
     
-    -- Vérifier les conditions de fin
+    -- Vérifier si le duel est terminé (5 manches atteintes)
     local duelFinished = false
     local winner = nil
     local winnerName = ""
     
-    -- Quelqu'un a atteint le nombre de manches pour gagner
-    if killerScore >= ROUNDS_TO_WIN then
-        duelFinished = true
-        winner = killerPlayerId
-        winnerName = GetPlayerName(killerPlayerId) or ("Joueur " .. killerPlayerId)
-        print("^2[DUEL] " .. winnerName .. " gagne le duel avec " .. killerScore .. " manches !^7")
-    -- On a atteint le maximum de manches
-    elseif instance.rounds.currentRound >= MAX_ROUNDS then
+    -- Duel terminé après 5 manches
+    if instance.rounds.currentRound >= MAX_ROUNDS then
         duelFinished = true
         
-        -- Trouver le joueur avec le plus de points
+        -- Trouver le gagnant (celui avec le plus de manches gagnées)
         local maxScore = 0
         local winners = {}
         
-        for playerId, score in pairs(instance.rounds.scores) do
+        for playerId, score in pairs(instance.rounds.playerScores) do
             if score > maxScore then
                 maxScore = score
                 winners = {playerId}
@@ -206,15 +199,15 @@ function handlePlayerDeath(instanceId, deadPlayerId, killerPlayerId)
         if #winners == 1 then
             winner = winners[1]
             winnerName = GetPlayerName(winner) or ("Joueur " .. winner)
-            print("^2[DUEL] " .. winnerName .. " gagne aux points avec " .. maxScore .. " manches !^7")
+            print("^2[DUEL] " .. winnerName .. " gagne le duel " .. maxScore .. " manches à " .. (5 - maxScore) .. " !^7")
         else
-            print("^3[DUEL] Égalité parfaite !^7")
+            print("^3[DUEL] Égalité parfaite 2-2 après 5 manches !^7")
         end
     end
     
     -- Envoyer les résultats aux joueurs
     for _, playerId in ipairs(instance.players) do
-        local playerScore = instance.rounds.scores[playerId] or 0
+        local playerScore = instance.rounds.playerScores[playerId] or 0
         local opponentId = nil
         local opponentScore = 0
         
@@ -222,7 +215,7 @@ function handlePlayerDeath(instanceId, deadPlayerId, killerPlayerId)
         for _, pid in ipairs(instance.players) do
             if pid ~= playerId then
                 opponentId = pid
-                opponentScore = instance.rounds.scores[pid] or 0
+                opponentScore = instance.rounds.playerScores[pid] or 0
                 break
             end
         end
