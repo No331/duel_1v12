@@ -7,6 +7,82 @@ local nextInstanceId = 1
 -- Configuration du système de manches
 local MAX_ROUNDS = 5
 
+-- Fonction pour obtenir un spawn opposé à l'autre joueur
+function getOppositeSpawn(instanceId, requestingPlayerId)
+    local instance = instances[instanceId]
+    if not instance then return nil end
+    
+    -- Coordonnées des arènes (copiées du client pour cohérence)
+    local arenas = {
+        aeroport = {
+            spawns = {
+                vector3(-1050.0, -2750.0, 20.0),
+                vector3(-1024.0, -2724.0, 20.0)
+            }
+        },
+        ["dans l'eau"] = {
+            spawns = {
+                vector3(-1320.0, 6650.0, 5.0),
+                vector3(-1296.0, 6622.0, 5.0)
+            }
+        },
+        foret = {
+            spawns = {
+                vector3(-1630.0, 4460.0, 3.0),
+                vector3(-1604.0, 4430.0, 3.0)
+            }
+        },
+        hippie = {
+            spawns = {
+                vector3(2435.0, 3770.0, 41.0),
+                vector3(2465.0, 3744.0, 41.0)
+            }
+        }
+    }
+    
+    local arena = arenas[instance.arena]
+    if not arena then return nil end
+    
+    -- Si c'est le premier joueur ou qu'il n'y a qu'un joueur, spawn aléatoire
+    if #instance.players <= 1 then
+        local randomIndex = math.random(1, #arena.spawns)
+        return arena.spawns[randomIndex]
+    end
+    
+    -- Trouver l'autre joueur
+    local otherPlayerId = nil
+    for _, playerId in ipairs(instance.players) do
+        if playerId ~= requestingPlayerId then
+            otherPlayerId = playerId
+            break
+        end
+    end
+    
+    if not otherPlayerId then
+        -- Pas d'autre joueur, spawn aléatoire
+        local randomIndex = math.random(1, #arena.spawns)
+        return arena.spawns[randomIndex]
+    end
+    
+    -- Obtenir la position de l'autre joueur
+    local otherPlayerPed = GetPlayerPed(otherPlayerId)
+    local otherPos = GetEntityCoords(otherPlayerPed)
+    
+    -- Calculer quelle spawn est la plus éloignée de l'autre joueur
+    local bestSpawn = arena.spawns[1]
+    local maxDistance = 0
+    
+    for _, spawn in ipairs(arena.spawns) do
+        local distance = #(vector3(spawn.x, spawn.y, spawn.z) - otherPos)
+        if distance > maxDistance then
+            maxDistance = distance
+            bestSpawn = spawn
+        end
+    end
+    
+    return bestSpawn
+end
+
 -- Fonction pour créer une nouvelle instance
 function createInstance(playerId, arenaType, weapon)
     local instanceId = nextInstanceId
@@ -336,6 +412,34 @@ AddEventHandler('duel:joinSpecificArena', function(arenaId, weapon)
     -- Mettre à jour la liste des arènes disponibles
     local availableArenas = getAvailableArenas()
     TriggerClientEvent('duel:updateAvailableArenas', -1, availableArenas)
+end)
+
+-- Event pour demander un spawn initial
+RegisterNetEvent('duel:requestInitialSpawn')
+AddEventHandler('duel:requestInitialSpawn', function(instanceId)
+    local source = source
+    
+    local spawnPos = getOppositeSpawn(instanceId, source)
+    if spawnPos then
+        local instance = instances[instanceId]
+        if instance then
+            TriggerClientEvent('duel:spawnAt', source, spawnPos, instance.weapon)
+        end
+    end
+end)
+
+-- Event pour demander un respawn
+RegisterNetEvent('duel:requestSpawn')
+AddEventHandler('duel:requestSpawn', function(instanceId)
+    local source = source
+    
+    local spawnPos = getOppositeSpawn(instanceId, source)
+    if spawnPos then
+        local instance = instances[instanceId]
+        if instance then
+            TriggerClientEvent('duel:spawnAt', source, spawnPos, instance.weapon)
+        end
+    end
 end)
 
 -- Event pour obtenir les arènes disponibles
